@@ -6,7 +6,7 @@ use toml;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Config {
-    format: String,
+    r#type: String,
     repodir: String,
 }
 

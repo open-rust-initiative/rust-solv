@@ -1,7 +1,7 @@
 use std::io::Read;
 use std::path::Path;
-use std::process::Command;
 
+use crate::yum::YumVariables;
 use anyhow::{Context, Result};
 use configparser;
 use flate2::read::GzDecoder;
@@ -146,61 +146,8 @@ impl Repo {
                 }
             }
             // Replace yum variables.
-            //
-            // $basearch refers to the base architecture of the system.
-            // For example, i686 machines have a base architecture of i386,
-            // and AMD64 and Intel 64 machines have a base architecture of x86_64.
-            if repo_baseurl.contains("$basearch") {
-                let mut basearch = String::from_utf8(Command::new("arch").output()?.stdout)?;
-                if basearch == "i686" {
-                    basearch = String::from("i386");
-                }
-                repo_baseurl = repo_baseurl.replace("$basearch", &basearch);
-            }
-            // $arch refers to the system's CPU architecture.
-            if repo_baseurl.contains("$arch") {
-                let arch = String::from_utf8(Command::new("arch").output()?.stdout)?;
-                repo_baseurl = repo_baseurl.replace("$arch", &arch);
-            }
-            // $releasever refers to the release version of the system.
-            // Yum obtains the value of $releasever from the distroverpkg=value line in the /etc/yum.conf configuration file.
-            // If there is no such line in /etc/yum.conf,
-            // then yum infers the correct value by deriving the version number from the system-release package.
-            if repo_baseurl.contains("$releasever") {
-                // First find distroverpkg=value line in /etc/yum.conf.
-                let mut yum_conf = configparser::ini::Ini::new_cs();
-                let map = yum_conf.load("/etc/yum.conf").unwrap();
-                let mut releasever = String::new();
-                for (_, kvs) in map {
-                    if releasever != "" {
-                        break;
-                    }
-                    for (key, value) in kvs {
-                        if key == "distroverpkg" {
-                            releasever = value.unwrap_or(String::new());
-                            break;
-                        } else {
-                            continue;
-                        }
-                    }
-                }
-                // If there is no distroverpkg=value in /etc/yum.conf,
-                // Get the $releasever by deriving the version number from the system-release package.
-                if releasever == "" {
-                    let release = String::from_utf8(
-                        Command::new("rpm")
-                            .args(["-q", "openEuler-release"])
-                            .output()?
-                            .stdout,
-                    )
-                    .with_context(|| "System-release package not found")?;
-                    // The release variable is a string like "system-release-version-...".
-                    // So we split the string by "-", then get the element with index 2.
-                    let release: Vec<&str> = release.split("-").collect();
-                    releasever = String::from(release[2]);
-                }
-                repo_baseurl = repo_baseurl.replace("$releasever", &releasever);
-            }
+            repo_name = YumVariables::replace_yum_variables(repo_name)?;
+            repo_baseurl = YumVariables::replace_yum_variables(repo_baseurl)?;
             let mut repo = Repo::from_baseurl(repo_baseurl)?;
             repo.name = repo_name;
             repos.push(repo);
@@ -218,6 +165,14 @@ mod tests {
         let repo_url = String::from("https://repo.openeuler.org/openEuler-22.03-LTS/OS/x86_64/");
         let repo: Repo = Repo::from_baseurl(repo_url)?;
         println!("{:?}", repo.packages);
+        Ok(())
+    }
+
+    #[test]
+    fn test_from_file() -> Result<()> {
+        let path = Path::new("/etc/yum.repos.d/openEuler.repo");
+        let repo = Repo::from_file(&path)?;
+        println!("{:?}", repo);
         Ok(())
     }
 }

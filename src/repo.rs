@@ -167,16 +167,39 @@ impl Repo {
             // If there is no such line in /etc/yum.conf,
             // then yum infers the correct value by deriving the version number from the system-release package.
             if repo_baseurl.contains("$releasever") {
-                let release = String::from_utf8(
-                    Command::new("rpm")
-                        .args(["-q", "openEuler-release"])
-                        .output()?
-                        .stdout,
-                )
-                .with_context(|| "System-release package not found")?;
-                let release: Vec<&str> = release.split("-").collect();
-                let releasever = release[2];
-                repo_baseurl = repo_baseurl.replace("$releasever", releasever);
+                // First find distroverpkg=value line in /etc/yum.conf.
+                let mut yum_conf = configparser::ini::Ini::new_cs();
+                let map = yum_conf.load("/etc/yum.conf").unwrap();
+                let mut releasever = String::new();
+                for (_, kvs) in map {
+                    if releasever != "" {
+                        break;
+                    }
+                    for (key, value) in kvs {
+                        if key == "distroverpkg" {
+                            releasever = value.unwrap_or(String::new());
+                            break;
+                        } else {
+                            continue;
+                        }
+                    }
+                }
+                // If there is no distroverpkg=value in /etc/yum.conf,
+                // Get the $releasever by deriving the version number from the system-release package.
+                if releasever == "" {
+                    let release = String::from_utf8(
+                        Command::new("rpm")
+                            .args(["-q", "openEuler-release"])
+                            .output()?
+                            .stdout,
+                    )
+                    .with_context(|| "System-release package not found")?;
+                    // The release variable is a string like "system-release-version-...".
+                    // So we split the string by "-", then get the element with index 2.
+                    let release: Vec<&str> = release.split("-").collect();
+                    releasever = String::from(release[2]);
+                }
+                repo_baseurl = repo_baseurl.replace("$releasever", &releasever);
             }
             let mut repo = Repo::from_baseurl(repo_baseurl)?;
             repo.name = repo_name;

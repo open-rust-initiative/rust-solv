@@ -8,6 +8,7 @@ use flate2::read::GzDecoder;
 use quick_xml;
 use reqwest;
 use serde::{Deserialize, Serialize};
+use walkdir::WalkDir;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Version {
@@ -154,6 +155,16 @@ impl Repo {
         }
         Ok(repos)
     }
+
+    fn from_dir(path: &Path) -> Result<Vec<Repo>> {
+        let mut repos: Vec<Repo> = Vec::new();
+        let walker = WalkDir::new(path).min_depth(1).into_iter();
+        for entry in walker.filter_map(|e| e.ok()) {
+            let mut repo = Repo::from_file(entry.path())?;
+            repos.append(&mut repo);
+        }
+        Ok(repos)
+    }
 }
 
 #[cfg(test)]
@@ -173,6 +184,16 @@ mod tests {
         let path = Path::new("/etc/yum.repos.d/openEuler.repo");
         let repo = Repo::from_file(&path)?;
         println!("{:?}", repo);
+        Ok(())
+    }
+
+    #[test]
+    fn test_from_dir() -> Result<()> {
+        let path = Path::new("/etc/yum.repos.d/");
+        let repos = Repo::from_dir(&path)?;
+        for repo in repos {
+            println!("{:?}", repo.name);
+        }
         Ok(())
     }
 }

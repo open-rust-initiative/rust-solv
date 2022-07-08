@@ -135,10 +135,19 @@ impl Repo {
             for (key, value) in kvs {
                 match key.trim() {
                     "name" => {
-                        repo_name = value.unwrap();
+                        repo_name = value.unwrap_or(String::new());
                     }
                     "baseurl" => {
-                        repo_baseurl = value.unwrap();
+                        repo_baseurl = match value {
+                            Some(url) => {
+                                if url.ends_with('/') {
+                                    url
+                                } else {
+                                    url + "/"
+                                }
+                            },
+                            None => String::new(),
+                        }
                     }
                     "mirrorlist" => {
                         // To be done...

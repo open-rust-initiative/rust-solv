@@ -12,50 +12,30 @@ use walkdir::WalkDir;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Version {
-    epoch: String,
+    epoch: u64,
     ver: String,
     rel: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Entry {
+struct RpmEntry {
     name: String,
     flags: Option<String>,
-    epoch: Option<String>,
+    epoch: Option<u64>,
     ver: Option<String>,
     rel: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Provides {
-    #[serde(rename = "entry")]
-    entries: Vec<Entry>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Requires {
-    #[serde(rename = "entry")]
-    entries: Vec<Entry>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Conflicts {
-    #[serde(rename = "entry")]
-    entries: Vec<Entry>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Obsoletes {
-    #[serde(rename = "entry")]
-    entries: Vec<Entry>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 struct Format {
-    provides: Option<Provides>,
-    requires: Option<Requires>,
-    conflicts: Option<Conflicts>,
-    obsoletes: Option<Obsoletes>,
+    #[serde(rename(deserialize = "rpm:provides", serialize = "provides"))]
+    provides: Option<RpmEntry>,
+    #[serde(rename(deserialize = "rpm:requires", serialize = "requires"))]
+    requires: Option<RpmEntry>,
+    #[serde(rename(deserialize = "rpm:conflicts", serialize = "conflicts"))]
+    conflicts: Option<RpmEntry>,
+    #[serde(rename(deserialize = "rpm:obsoletes", serialize = "obsoletes"))]
+    obsoletes: Option<RpmEntry>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

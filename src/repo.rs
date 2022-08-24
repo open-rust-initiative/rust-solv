@@ -57,7 +57,7 @@ struct Repo {
     #[serde(skip)]
     name: String,
     #[serde(skip)]
-    providers: HashMap<String, IdT>,
+    providers: HashMap<String, Vec<IdT>>,
 }
 
 impl Repo {
@@ -69,7 +69,11 @@ impl Repo {
         for package in &repo.packages {
             if let Some(ref provides) = package.format.provides {
                 for entry in &provides.entries {
-                    repo.providers.insert(entry.name.clone(), index);
+                    if let Some(ids) = repo.providers.get_mut(&entry.name) {
+                        ids.push(index);
+                    } else {
+                        repo.providers.insert(entry.name.clone(), vec![index]);
+                    }
                 }
             }
             index += 1;

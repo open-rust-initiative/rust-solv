@@ -1,13 +1,14 @@
-use std::io::Read;
-use std::path::Path;
-
+use crate::repomd::Repomd;
 use crate::yum::YumVariables;
 use anyhow::{Context, Result};
 use configparser;
-use flate2::read::GzDecoder;
+use futures;
 use quick_xml;
-use reqwest;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::Path;
+use tokio_stream::StreamExt;
+use walkdir::DirEntry;
 use walkdir::WalkDir;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -27,20 +28,23 @@ struct RpmEntry {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Format {
-    #[serde(rename(deserialize = "rpm:provides", serialize = "provides"))]
-    provides: Option<RpmEntry>,
-    #[serde(rename(deserialize = "rpm:requires", serialize = "requires"))]
-    requires: Option<RpmEntry>,
-    #[serde(rename(deserialize = "rpm:conflicts", serialize = "conflicts"))]
-    conflicts: Option<RpmEntry>,
-    #[serde(rename(deserialize = "rpm:obsoletes", serialize = "obsoletes"))]
-    obsoletes: Option<RpmEntry>,
+struct Entries {
+    #[serde(rename = "entry")]
+    entries: Vec<RpmEntry>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Package {
-    r#type: String,
+struct Format {
+    provides: Option<Entries>,
+    requires: Option<Entries>,
+    conflicts: Option<Entries>,
+    obsoletes: Option<Entries>,
+}
+
+type IdT = usize;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Package {
     name: String,
     version: Version,
     format: Format,
@@ -52,64 +56,42 @@ struct Repo {
     packages: Vec<Package>,
     #[serde(skip)]
     name: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Repomd {
-    #[serde(rename = "data")]
-    datas: Vec<Data>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Data {
-    r#type: String,
-    location: Location,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Location {
-    href: String,
+    #[serde(skip)]
+    providers: HashMap<String, IdT>,
 }
 
 impl Repo {
     fn from_baseurl(repo_url: String) -> Result<Repo> {
-        // Get repomd.xml from the repo.
-        let repomd_url = repo_url.clone() + "repodata/repomd.xml";
-        let repomd_xml = reqwest::blocking::get(&repomd_url)
-            .with_context(|| format!("Failed to connect to {:?}", &repomd_url))?
-            .text()?;
-        // Deserialize repomd.xml into a structure using serde.
-        let repomd: Repomd =
-            quick_xml::de::from_str(&repomd_xml).with_context(|| "Failed to parse repomd.xml")?;
-        // Get the url of primary.xml.gz, download and decompress it.
-        let mut primary_gz_url = repo_url.clone();
-        for data in &repomd.datas {
-            if data.r#type == "primary" {
-                primary_gz_url = primary_gz_url + &data.location.href;
-                break;
+        let primary_xml = Repomd::get_primary_xml(repo_url)?;
+        let mut repo: Repo =
+            quick_xml::de::from_str(&primary_xml).with_context(|| "Failed to parse primary.xml")?;
+        let mut index: IdT = 0;
+        for package in &repo.packages {
+            if let Some(ref provides) = package.format.provides {
+                for entry in &provides.entries {
+                    repo.providers.insert(entry.name.clone(), index);
+                }
             }
+            index += 1;
         }
-        let primary_gz_bytes: Result<Vec<_>, _> = reqwest::blocking::get(&primary_gz_url)
-            .with_context(|| format!("Failed to connect to {:?}", &primary_gz_url))?
-            .bytes()?
-            .bytes()
-            .collect();
-        let primary_gz_bytes = primary_gz_bytes.unwrap();
-        let mut primary_gz = GzDecoder::new(&primary_gz_bytes[..]);
-        let mut primary_xml = String::new();
-        primary_gz.read_to_string(&mut primary_xml)?;
-        quick_xml::de::from_str(&primary_xml).with_context(|| "Failed to parse primary.xml")
+        Ok(repo)
+    }
+
+    async fn from_dir_entry(entry: DirEntry) -> Result<Vec<Repo>> {
+        let path = entry.path();
+        Repo::from_file(path).await
     }
 
     // Read the .repo config file at path,
     // then return a vector of repos in the file.
-    fn from_file(path: &Path) -> Result<Vec<Repo>> {
+    async fn from_file(path: &Path) -> Result<Vec<Repo>> {
         let mut repos: Vec<Repo> = Vec::new();
         // Parse .repo config file into a map.
         let mut config = configparser::ini::Ini::new_cs();
         let map = config.load(path.to_str().unwrap()).unwrap();
         // Iterate each repo.
-        for (_, kvs) in map {
+        let mut stream = tokio_stream::iter(map);
+        while let Some((_, kvs)) = stream.next().await {
             let mut repo_name = String::new();
             let mut repo_baseurl = String::new();
             for (key, value) in kvs {
@@ -125,7 +107,7 @@ impl Repo {
                                 } else {
                                     url + "/"
                                 }
-                            },
+                            }
                             None => String::new(),
                         }
                     }
@@ -145,12 +127,24 @@ impl Repo {
         Ok(repos)
     }
 
-    fn from_dir(path: &Path) -> Result<Vec<Repo>> {
+    async fn from_dir(path: &Path) -> Result<Vec<Repo>> {
+        let dirs: Vec<_> = WalkDir::new(path)
+            .min_depth(1)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .collect();
+        let futures: Vec<_> = dirs
+            .into_iter()
+            .map(|entry| Repo::from_dir_entry(entry))
+            .collect();
+        let results = futures::future::join_all(futures).await;
         let mut repos: Vec<Repo> = Vec::new();
-        let walker = WalkDir::new(path).min_depth(1).into_iter();
-        for entry in walker.filter_map(|e| e.ok()) {
-            let mut repo = Repo::from_file(entry.path())?;
-            repos.append(&mut repo);
+        for result in results {
+            if let Ok(mut repo) = result {
+                repos.append(&mut repo);
+            } else {
+                continue;
+            }
         }
         Ok(repos)
     }
@@ -158,6 +152,8 @@ impl Repo {
 
 #[cfg(test)]
 mod tests {
+    use futures::executor::block_on;
+
     use super::*;
 
     #[test]
@@ -171,7 +167,7 @@ mod tests {
     #[test]
     fn test_from_file() -> Result<()> {
         let path = Path::new("/etc/yum.repos.d/openEuler.repo");
-        let repo = Repo::from_file(&path)?;
+        let repo = block_on(Repo::from_file(&path))?;
         println!("{:?}", repo);
         Ok(())
     }
@@ -179,7 +175,7 @@ mod tests {
     #[test]
     fn test_from_dir() -> Result<()> {
         let path = Path::new("/etc/yum.repos.d/");
-        let repos = Repo::from_dir(&path)?;
+        let repos = block_on(Repo::from_dir(&path))?;
         for repo in repos {
             println!("{:?}", repo.name);
         }

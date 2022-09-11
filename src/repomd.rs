@@ -32,7 +32,11 @@ impl Repomd {
         let repomd: Repomd =
             quick_xml::de::from_str(&repomd_xml).with_context(|| "Failed to parse repomd.xml")?;
         // Get the url of primary.xml.gz, download and decompress it.
-        let primary_data: Vec<Data> = repomd.datas.into_iter().filter(|data| data.r#type == "primary").collect();
+        let primary_data: Vec<Data> = repomd
+            .datas
+            .into_iter()
+            .filter(|data| data.r#type == "primary")
+            .collect();
         let primary_gz_url = repo_url.clone() + &primary_data[0].location.href;
         let primary_gz_bytes: Result<Vec<_>, _> = reqwest::blocking::get(&primary_gz_url)
             .with_context(|| format!("Failed to connect to {:?}", &primary_gz_url))?

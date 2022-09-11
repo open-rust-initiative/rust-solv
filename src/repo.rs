@@ -1,15 +1,9 @@
 use crate::repomd::Repomd;
 use crate::yum::YumVariables;
 use anyhow::{Context, Result};
-use configparser;
-use futures;
 use quick_xml;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
-use tokio_stream::StreamExt;
-use walkdir::DirEntry;
-use walkdir::WalkDir;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Version {
@@ -18,8 +12,8 @@ struct Version {
     rel: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct RpmEntry {
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RpmEntry {
     name: String,
     flags: Option<String>,
     epoch: Option<u64>,
@@ -27,21 +21,21 @@ struct RpmEntry {
     rel: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Entries {
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Entries {
     #[serde(rename = "entry")]
     entries: Vec<RpmEntry>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Format {
+pub struct Format {
     provides: Option<Entries>,
     requires: Option<Entries>,
     conflicts: Option<Entries>,
     obsoletes: Option<Entries>,
 }
 
-type IdT = usize;
+pub type IdT = usize;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Package {
@@ -51,22 +45,26 @@ pub struct Package {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Repo {
+pub struct Repo {
     #[serde(rename = "package")]
     packages: Vec<Package>,
-    #[serde(skip)]
-    name: String,
     #[serde(skip)]
     providers: HashMap<String, Vec<IdT>>,
 }
 
 impl Repo {
-    fn from_baseurl(repo_url: String) -> Result<Repo> {
-        let primary_xml = Repomd::get_primary_xml(repo_url)?;
+    pub fn from_baseurl(repo_baseurl: &str) -> Result<Repo> {
+        let repo_baseurl = if repo_baseurl.ends_with('/') {
+            repo_baseurl.to_string()
+        } else {
+            repo_baseurl.to_string() + "/"
+        };
+        let yum_variables = YumVariables::new()?;
+        let repo_baseurl = yum_variables.replace_yum_variables(repo_baseurl)?;
+        let primary_xml = Repomd::get_primary_xml(repo_baseurl)?;
         let mut repo: Repo =
             quick_xml::de::from_str(&primary_xml).with_context(|| "Failed to parse primary.xml")?;
-        let mut index: IdT = 0;
-        for package in &repo.packages {
+        for (index, package) in repo.packages.iter().enumerate() {
             if let Some(ref provides) = package.format.provides {
                 for entry in &provides.entries {
                     if let Some(ids) = repo.providers.get_mut(&entry.name) {
@@ -76,113 +74,100 @@ impl Repo {
                     }
                 }
             }
-            index += 1;
         }
         Ok(repo)
     }
 
-    async fn from_dir_entry(entry: DirEntry) -> Result<Vec<Repo>> {
-        let path = entry.path();
-        Repo::from_file(path).await
-    }
-
-    // Read the .repo config file at path,
-    // then return a vector of repos in the file.
-    async fn from_file(path: &Path) -> Result<Vec<Repo>> {
-        let mut repos: Vec<Repo> = Vec::new();
-        // Parse .repo config file into a map.
-        let mut config = configparser::ini::Ini::new_cs();
-        let map = config.load(path.to_str().unwrap()).unwrap();
-        // Iterate each repo.
-        let mut stream = tokio_stream::iter(map);
-        while let Some((_, kvs)) = stream.next().await {
-            let mut repo_name = String::new();
-            let mut repo_baseurl = String::new();
-            for (key, value) in kvs {
-                match key.trim() {
-                    "name" => {
-                        repo_name = value.unwrap_or(String::new());
-                    }
-                    "baseurl" => {
-                        repo_baseurl = match value {
-                            Some(url) => {
-                                if url.ends_with('/') {
-                                    url
-                                } else {
-                                    url + "/"
-                                }
-                            }
-                            None => String::new(),
-                        }
-                    }
-                    "mirrorlist" => {
-                        // To be done...
-                    }
-                    _ => (),
-                }
-            }
-            // Replace yum variables.
-            repo_name = YumVariables::replace_yum_variables(repo_name)?;
-            repo_baseurl = YumVariables::replace_yum_variables(repo_baseurl)?;
-            let mut repo = Repo::from_baseurl(repo_baseurl)?;
-            repo.name = repo_name;
-            repos.push(repo);
-        }
-        Ok(repos)
-    }
-
-    async fn from_dir(path: &Path) -> Result<Vec<Repo>> {
-        let dirs: Vec<_> = WalkDir::new(path)
-            .min_depth(1)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .collect();
-        let futures: Vec<_> = dirs
-            .into_iter()
-            .map(|entry| Repo::from_dir_entry(entry))
-            .collect();
-        let results = futures::future::join_all(futures).await;
-        let mut repos: Vec<Repo> = Vec::new();
-        for result in results {
-            if let Ok(mut repo) = result {
-                repos.append(&mut repo);
-            } else {
-                continue;
+    pub fn get_package_id_by_name(&self, name: &str) -> Option<IdT> {
+        for (id, package) in self.packages.iter().enumerate() {
+            if package.name == name {
+                return Some(id);
             }
         }
-        Ok(repos)
+        None
+    }
+
+    pub fn get_package_requires_by_id<'a>(&'a self, package_id: IdT) -> Option<&'a Vec<RpmEntry>> {
+        if let Some(package) = self.packages.get(package_id) {
+            if let Some(ref e) = package.format.requires {
+                return Some(&e.entries);
+            }
+        }
+        None
+    }
+
+    pub fn get_package_conflicts_by_id<'a>(&'a self, package_id: IdT) -> Option<&'a Vec<RpmEntry>> {
+        if let Some(package) = self.packages.get(package_id) {
+            if let Some(ref e) = package.format.conflicts {
+                return Some(&e.entries);
+            }
+        }
+        None
+    }
+
+    pub fn get_package_obsoletes_by_id<'a>(&'a self, package_id: IdT) -> Option<&'a Vec<RpmEntry>> {
+        if let Some(package) = self.packages.get(package_id) {
+            if let Some(ref e) = package.format.obsoletes {
+                return Some(&e.entries);
+            }
+        }
+        None
+    }
+
+    pub fn get_entry_provider_id(&self, entry: &RpmEntry) -> Option<&Vec<IdT>> {
+        self.providers.get(&entry.name)
+    }
+}
+
+impl Package {
+    pub fn requires(self) -> Option<Vec<RpmEntry>> {
+        if let Some(e) = self.format.requires {
+            Some(e.entries)
+        } else {
+            None
+        }
+    }
+
+    pub fn conflicts(self) -> Option<Vec<RpmEntry>> {
+        if let Some(e) = self.format.conflicts {
+            Some(e.entries)
+        } else {
+            None
+        }
+    }
+
+    pub fn obsoletes(self) -> Option<Vec<RpmEntry>> {
+        if let Some(e) = self.format.obsoletes {
+            Some(e.entries)
+        } else {
+            None
+        }
+    }
+
+    pub fn provides(self) -> Option<Vec<RpmEntry>> {
+        if let Some(e) = self.format.provides {
+            Some(e.entries)
+        } else {
+            None
+        }
+    }
+}
+
+impl RpmEntry {
+    pub fn get_name(self) -> String {
+        self.name
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use futures::executor::block_on;
-
     use super::*;
 
     #[test]
     fn test_parse_primary_xml() -> Result<()> {
         let repo_url = String::from("https://repo.openeuler.org/openEuler-22.03-LTS/OS/x86_64/");
-        let repo: Repo = Repo::from_baseurl(repo_url)?;
+        let repo: Repo = Repo::from_baseurl(&repo_url)?;
         println!("{:?}", repo.packages);
-        Ok(())
-    }
-
-    #[test]
-    fn test_from_file() -> Result<()> {
-        let path = Path::new("/etc/yum.repos.d/openEuler.repo");
-        let repo = block_on(Repo::from_file(&path))?;
-        println!("{:?}", repo);
-        Ok(())
-    }
-
-    #[test]
-    fn test_from_dir() -> Result<()> {
-        let path = Path::new("/etc/yum.repos.d/");
-        let repos = block_on(Repo::from_dir(&path))?;
-        for repo in repos {
-            println!("{:?}", repo.name);
-        }
         Ok(())
     }
 }

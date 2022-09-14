@@ -1,24 +1,25 @@
 use crate::repomd::Repomd;
+use crate::version::{version_compare, Flag};
 use crate::yum::YumVariables;
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use quick_xml;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Version {
-    epoch: u64,
+    epoch: i32,
     ver: String,
     rel: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RpmEntry {
-    name: String,
-    flags: Option<String>,
-    epoch: Option<u64>,
-    ver: Option<String>,
-    rel: Option<String>,
+    pub name: String,
+    pub flags: Option<String>,
+    pub epoch: Option<i32>,
+    pub ver: Option<String>,
+    pub rel: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -117,6 +118,102 @@ impl Repo {
     pub fn get_entry_provider_id(&self, entry: &RpmEntry) -> Option<&Vec<IdT>> {
         self.providers.get(&entry.name)
     }
+
+    fn get_entry_by_provider_id(&self, provider_id: IdT, entry_name: &str) -> Option<&RpmEntry> {
+        for entry in &self.packages[provider_id]
+            .format
+            .provides
+            .as_ref()
+            .unwrap()
+            .entries
+        {
+            if entry.name == entry_name {
+                return Some(entry);
+            }
+        }
+        None
+    }
+
+    // Package requires entry x, and it is provided by another package as entry y.
+    pub fn check_version_constraint(
+        &self,
+        entry_required: &RpmEntry,
+        provider_id: &IdT,
+    ) -> Result<bool> {
+        if let Some(flags) = &entry_required.flags {
+            let entry_provided = self
+                .get_entry_by_provider_id(*provider_id, &entry_required.name)
+                .unwrap();
+            match flags.as_str() {
+                "LT" => match &entry_provided.flags {
+                    Some(flags) => match flags.as_str() {
+                        "GE" | "EQ" | "GT" => {
+                            version_compare(entry_required, entry_provided, Flag::GT)
+                        }
+                        _ => Ok(true),
+                    },
+                    _ => Ok(true),
+                },
+                "LE" => match &entry_provided.flags {
+                    Some(flags) => match flags.as_str() {
+                        "GE" | "EQ" => {
+                            version_compare(entry_required, entry_provided, Flag::GE)
+                        },
+                        "GT" => {
+                            version_compare(entry_required, entry_provided, Flag::GT)
+                        },
+                        _ => Ok(true),
+                    },
+                    _ => Ok(true),
+                },
+                "EQ" => match &entry_provided.flags {
+                    Some(flags) => match flags.as_str() {
+                        "LE" => {
+                            version_compare(entry_required, entry_provided, Flag::GE)
+                        },
+                        "LT" => {
+                            version_compare(entry_required, entry_provided, Flag::GT)
+                        },
+                        "EQ" => {
+                            version_compare(entry_required, entry_provided, Flag::EQ)
+                        },
+                        "GT" => {
+                            version_compare(entry_required, entry_provided, Flag::LT)
+                        },
+                        "GE" => {
+                            version_compare(entry_required, entry_provided, Flag::LE)
+                        }
+                        _ => Ok(true),
+                    },
+                    _ => Ok(true),
+                },
+                "GE" => match &entry_provided.flags {
+                    Some(flags) => match flags.as_str() {
+                        "LE" | "EQ" => {
+                            version_compare(entry_required, entry_provided, Flag::LE)
+                        },
+                        "LT" => {
+                            version_compare(entry_required, entry_provided, Flag::LT)
+                        },
+                        _ => Ok(true),
+                    },
+                    _ => Ok(true),
+                },
+                "GT" => match &entry_provided.flags {
+                    Some(flags) => match flags.as_str() {
+                        "LE" | "EQ" | "LT" => {
+                            version_compare(entry_required, entry_provided, Flag::LT)
+                        }
+                        _ => Ok(true),
+                    },
+                    _ => Ok(true),
+                },
+                _ => Err(anyhow!("invalid flags of entry")),
+            }
+        } else {
+            Ok(true)
+        }
+    }
 }
 
 impl Package {
@@ -154,8 +251,24 @@ impl Package {
 }
 
 impl RpmEntry {
-    pub fn get_name(self) -> String {
-        self.name
+    pub fn get_name(&self) -> &String {
+        &self.name
+    }
+
+    pub fn get_epoch(&self) -> Option<i32> {
+        self.epoch
+    }
+
+    pub fn get_ver(&self) -> Option<&String> {
+        self.ver.as_ref()
+    }
+
+    pub fn get_rel(&self) -> Option<&String> {
+        self.rel.as_ref()
+    }
+
+    pub fn get_flags(&self) -> Option<&String> {
+        self.flags.as_ref()
     }
 }
 

@@ -18,12 +18,12 @@ struct Repoinfo {
 
 impl Config {
     fn from_str(s: &str) -> Result<Config> {
-        toml::from_str(s).with_context(|| "Error: failed to parse the config file.")
+        toml::from_str(s).with_context(|| "failed to parse the config file.")
     }
 
     pub fn from_file(path: &Path) -> Result<Config> {
         let s = fs::read_to_string(path)
-            .with_context(|| format!("Error: failed to open the config file {:?}.", path))?;
+            .with_context(|| format!("failed to open the config file {:?}.", path))?;
         Config::from_str(&s)
     }
 

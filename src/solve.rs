@@ -1,7 +1,7 @@
 use crate::repo::{IdT, Repo};
 use anyhow::{anyhow, Result};
 use std::collections::{HashSet, VecDeque};
-use varisat::{CnfFormula, ExtendFormula, Lit, solver::Solver};
+use varisat::{solver::Solver, CnfFormula, ExtendFormula, Lit};
 
 fn get_formula_by_package_id(repo: &Repo, package_id: IdT) -> Result<CnfFormula> {
     let mut q = VecDeque::new();
@@ -13,8 +13,15 @@ fn get_formula_by_package_id(repo: &Repo, package_id: IdT) -> Result<CnfFormula>
             for entry in requires {
                 if let Some(providers) = repo.get_entry_provider_id(entry) {
                     let mut clause: Vec<Lit> = providers
-                        .into_iter()
-                        .map(|id| Lit::from_index(*id, true))
+                        .iter()
+                        .filter(|&id| {
+                            if let Ok(constraint) = repo.check_version_constraint(entry, id) {
+                                constraint
+                            } else {
+                                false
+                            }
+                        })
+                        .map(|&id| Lit::from_index(id, true))
                         .collect();
                     clause.push(Lit::from_index(package_id, false));
                     formula.add_clause(&clause);
@@ -74,6 +81,10 @@ pub fn check_package_satisfiability_in_repo(repo: &Repo, package_name: &String) 
         solver.add_formula(&formula);
         Ok(solver.solve()?)
     } else {
-        Err(anyhow!("The package {} is not found in the repository!", package_name))
+        println!(
+            "Error: the package {} is not found in the repository!",
+            package_name
+        );
+        Err(anyhow!("package not found"))
     }
 }

@@ -11,7 +11,8 @@ fn main() -> Result<()> {
     if packages.is_empty() {
         panic!("Package name not found!");
     } else {
-        let cfg = config::Config::from_file(Path::new("~/.config/rust-solv/config.toml"))?;
+        let config_path_str = std::env::var("HOME")? + "/.config/rust-solv/config.toml";
+        let cfg = config::Config::from_file(Path::new(&config_path_str))?;
         if let Some(repo_baseurl) = cfg.get_repo_baseurl() {
             let repo = repo::Repo::from_baseurl(repo_baseurl)?;
             for package_name in packages {

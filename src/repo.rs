@@ -54,15 +54,7 @@ pub struct Repo {
 }
 
 impl Repo {
-    pub fn from_baseurl(repo_baseurl: &str) -> Result<Repo> {
-        let repo_baseurl = if repo_baseurl.ends_with('/') {
-            repo_baseurl.to_string()
-        } else {
-            repo_baseurl.to_string() + "/"
-        };
-        let yum_variables = YumVariables::new()?;
-        let repo_baseurl = yum_variables.replace_yum_variables(repo_baseurl)?;
-        let primary_xml = Repomd::get_primary_xml(repo_baseurl)?;
+    pub fn from_str(primary_xml: &str) -> Result<Repo> {
         let mut repo: Repo =
             quick_xml::de::from_str(&primary_xml).with_context(|| "Failed to parse primary.xml")?;
         for (index, package) in repo.packages.iter().enumerate() {
@@ -77,6 +69,18 @@ impl Repo {
             }
         }
         Ok(repo)
+    }
+
+    pub fn from_baseurl(repo_baseurl: &str) -> Result<Repo> {
+        let repo_baseurl = if repo_baseurl.ends_with('/') {
+            repo_baseurl.to_string()
+        } else {
+            repo_baseurl.to_string() + "/"
+        };
+        let yum_variables = YumVariables::new()?;
+        let repo_baseurl = yum_variables.replace_yum_variables(repo_baseurl)?;
+        let primary_xml = Repomd::get_primary_xml(repo_baseurl)?;
+        Repo::from_str(&primary_xml)
     }
 
     pub fn get_package_id_by_name(&self, name: &str) -> Option<IdT> {

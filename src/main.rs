@@ -18,8 +18,7 @@ fn main() -> Result<()> {
             for package_name in packages {
                 match solve::check_package_satisfiability_in_repo(&repo, &package_name) {
                     Ok(true) => println!("Congratulations! Package {}'s dependencies can be satisfied in the repo. :)", package_name),
-                    Ok(false) => println!("Sorry, package {}'s dependencies can not be satisfied in the repo. :(", package_name),
-                    Err(_) => println!("Error: something wrong happened while solving the dependency problem of package {}.", package_name),
+                    _ => println!("Sorry, package {}'s dependencies can not be satisfied in the repo. :(", package_name),
                 }
             }
             Ok(())

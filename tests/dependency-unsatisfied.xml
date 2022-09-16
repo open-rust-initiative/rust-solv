@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<metadata xmlns="http://linux.duke.edu/metadata/common" xmlns:rpm="http://linux.duke.edu/metadata/rpm" packages="2609">
+<package type="rpm">
+  <name>A</name>
+  <arch>x86_64</arch>
+  <version epoch="0" ver="2.1.3" rel="22.oe2203"/>
+  <format>
+    <rpm:provides>
+      <rpm:entry name="A" flags="EQ" epoch="0" ver="2.1.3" rel="22.oe2203"/>
+    </rpm:provides>
+    <rpm:requires>
+      <rpm:entry name="B"/>
+      <rpm:entry name="C"/>
+      <rpm:entry name="D"/>
+    </rpm:requires>
+  </format>
+</package>
+<package type="rpm">
+  <name>B</name>
+  <arch>x86_64</arch>
+  <version epoch="0" ver="2.1.3" rel="22.oe2203"/>
+  <format>
+    <rpm:provides>
+      <rpm:entry name="B" flags="EQ" epoch="0" ver="2.1.3" rel="22.oe2203"/>
+    </rpm:provides>
+  </format>
+</package>
+<package type="rpm">
+  <name>C</name>
+  <arch>x86_64</arch>
+  <version epoch="0" ver="2.1.3" rel="22.oe2203"/>
+  <format>
+    <rpm:provides>
+      <rpm:entry name="C" flags="EQ" epoch="0" ver="2.1.3" rel="22.oe2203"/>
+    </rpm:provides>
+    <rpm:requires>
+      <rpm:entry name="B"/>
+    </rpm:requires>
+    <rpm:conflicts>
+      <rpm:entry name="D"/>
+    </rpm:conflicts>
+  </format>
+</package>
+<package type="rpm">
+  <name>D</name>
+  <arch>x86_64</arch>
+  <version epoch="0" ver="2.1.3" rel="22.oe2203"/>
+  <format>
+    <rpm:provides>
+      <rpm:entry name="D" flags="EQ" epoch="0" ver="2.1.3" rel="22.oe2203"/>
+    </rpm:provides>
+  </format>
+</package>
+</metadata>

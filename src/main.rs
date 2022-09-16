@@ -17,8 +17,11 @@ fn main() -> Result<()> {
             let repo = repo::Repo::from_baseurl(repo_baseurl)?;
             for package_name in packages {
                 match solve::check_package_satisfiability_in_repo(&repo, &package_name) {
-                    Ok(true) => println!("Congratulations! Package {}'s dependencies can be satisfied in the repo. :)", package_name),
-                    _ => println!("Sorry, package {}'s dependencies can not be satisfied in the repo. :(", package_name),
+                    Ok(solve::ReturnValue::Satisfied) => println!("Congratulations! Package {}'s dependencies can be satisfied in the repo. :)", package_name),
+                    Ok(solve::ReturnValue::Unsatisfied) => println!("Sorry, package {}'s dependencies can not be satisfied in the repo. :(", package_name),
+                    Ok(solve::ReturnValue::VersionConflict) => println!("Sorry, package {}'s dependencies can not be satisfied in the repo. (version conflict) :(", package_name),
+                    Ok(solve::ReturnValue::PackageNotFound) => println!("Error: package {} not found in the repo. :(", package_name),
+                    Err(_) => println!("Error: something wrong happened while solving. :("),
                 }
             }
             Ok(())

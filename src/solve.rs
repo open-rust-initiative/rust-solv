@@ -3,6 +3,13 @@ use anyhow::{anyhow, Result};
 use std::collections::{HashSet, VecDeque};
 use varisat::{solver::Solver, CnfFormula, ExtendFormula, Lit};
 
+pub enum ReturnValue {
+    Satisfied,
+    Unsatisfied,
+    VersionConflict,
+    PackageNotFound,
+}
+
 fn get_formula_by_package_id(repo: &Repo, package_id: IdT) -> Result<CnfFormula> {
     let mut q = VecDeque::new();
     let mut formula = CnfFormula::new();
@@ -34,7 +41,6 @@ fn get_formula_by_package_id(repo: &Repo, package_id: IdT) -> Result<CnfFormula>
                         clause.push(Lit::from_index(package_id, false));
                         formula.add_clause(&clause);
                     } else {
-                        println!("version constraint not satisfied");
                         return Err(anyhow!("version constraint not satisfied"));
                     }
                 }
@@ -80,18 +86,24 @@ fn get_formula_by_package_id(repo: &Repo, package_id: IdT) -> Result<CnfFormula>
     Ok(formula)
 }
 
-pub fn check_package_satisfiability_in_repo(repo: &Repo, package_name: &String) -> Result<bool> {
+pub fn check_package_satisfiability_in_repo(repo: &Repo, package_name: &String) -> Result<ReturnValue> {
     if let Some(package_id) = repo.get_package_id_by_name(&package_name) {
-        let formula = get_formula_by_package_id(repo, package_id)?;
-        let mut solver = Solver::new();
-        solver.add_formula(&formula);
-        solver.assume(&[Lit::from_index(package_id, true)]);
-        Ok(solver.solve()?)
+        if let Ok(formula) = get_formula_by_package_id(repo, package_id) {
+            let mut solver = Solver::new();
+            solver.add_formula(&formula);
+            solver.assume(&[Lit::from_index(package_id, true)]);
+            match solver.solve() {
+                Ok(true) => Ok(ReturnValue::Satisfied),
+                _ => Ok(ReturnValue::Unsatisfied),
+            }
+        } else {
+            Ok(ReturnValue::VersionConflict)
+        }
     } else {
         println!(
             "Error: the package {} is not found in the repository!",
             package_name
         );
-        Err(anyhow!("package not found"))
+        Ok(ReturnValue::PackageNotFound)
     }
 }

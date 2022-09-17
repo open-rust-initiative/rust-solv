@@ -26,6 +26,7 @@ impl YumVariables {
         match arch.as_str() {
             "i386" | "i586" | "i686" => Ok("i386".to_string()),
             "x86_64" => Ok("x86_64".to_string()),
+            "aarch64" => Ok("aarch64".to_string()),
             _ => Err(anyhow!("Error: unknown basearch.")),
         }
     }

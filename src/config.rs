@@ -6,7 +6,6 @@ use toml;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
-    r#type: String,
     repoinfo: Repoinfo,
 }
 
